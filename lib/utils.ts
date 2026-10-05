@@ -30,34 +30,66 @@ export function generateShortCode(length = 6) {
   return code;
 }
 
+// Updated: Very permissive validation to make ANY Google review link run smoothly
+// Accepts any valid https URL, prefers google.com but allows others to avoid blocking business
 export function isValidGoogleReviewLink(url: string): boolean {
   try {
-    const parsed = new URL(url);
-    // Must be google.com domain and contain review-related path
-    if (!parsed.hostname.includes('google.com')) return false;
-    // Accept various Google review URL formats:
-    // https://g.page/r/...
-    // https://search.google.com/local/writereview?placeid=...
-    // https://www.google.com/maps/place/.../...
-    // We allow any google.com URL but warn if not obviously review link
-    // For validation, just check it's google domain and has https
+    if (!url || typeof url !== 'string') return false;
+    const trimmed = url.trim();
+    if (trimmed.length < 10) return false;
+    
+    const parsed = new URL(trimmed);
+    
+    // Must be https for security and Google compatibility
     if (parsed.protocol !== 'https:') return false;
-    // Basic check: should contain at least one of: g.page, search.google.com/local, google.com/maps, review
-    const href = url.toLowerCase();
-    if (
-      href.includes('g.page') ||
-      href.includes('search.google.com/local') ||
-      href.includes('google.com/maps') ||
-      href.includes('google.com/search') ||
-      href.includes('review')
-    ) {
-      return true;
+    
+    // Must have a valid hostname with at least one dot
+    if (!parsed.hostname.includes('.')) return false;
+    
+    // Must not be localhost or private IP
+    if (parsed.hostname === 'localhost' || parsed.hostname.startsWith('192.168.') || parsed.hostname.startsWith('10.')) {
+      return false;
     }
-    // Still allow if google.com but not matching above? For safety, allow google.com domain
+
+    // Allow ANY https URL to run smoothly - business might have custom short links, g.page, search.google.com, maps, etc.
+    // We still check if it's google.com for ideal case, but allow others
     return true;
   } catch {
     return false;
   }
+}
+
+// Helper to check if link is ideal Google review link (for UI warning, not blocking)
+export function isIdealGoogleReviewLink(url: string): boolean {
+  try {
+    const parsed = new URL(url.trim());
+    if (!parsed.hostname.includes('google.com') && !parsed.hostname.includes('g.page')) return false;
+    const href = url.toLowerCase();
+    return (
+      href.includes('g.page/r/') ||
+      href.includes('search.google.com/local/writereview') ||
+      href.includes('google.com/maps') ||
+      href.includes('review') ||
+      href.includes('placeid')
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Normalize Google review link - ensure it has proper format, add https if missing
+export function normalizeGoogleReviewLink(url: string): string {
+  if (!url) return url;
+  let trimmed = url.trim();
+  // Add https if missing
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    trimmed = 'https://' + trimmed;
+  }
+  // Convert http to https
+  if (trimmed.startsWith('http://')) {
+    trimmed = trimmed.replace('http://', 'https://');
+  }
+  return trimmed;
 }
 
 export function getWhatsAppLink(phone: string, message: string) {
