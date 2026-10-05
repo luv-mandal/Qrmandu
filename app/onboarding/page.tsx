@@ -133,7 +133,12 @@ export default function OnboardingPage() {
       }
       setStep(s => s + 1);
     } else {
-      router.push('/dashboard');
+      // Final step - ensure business saved and hard navigate to dashboard to avoid cache/redirect loop
+      try {
+        await saveBusiness();
+      } catch {}
+      // Use hard navigation to ensure dashboard fetches fresh business data (fixes Vercel ephemeral issue)
+      window.location.href = '/dashboard';
     }
   }
 

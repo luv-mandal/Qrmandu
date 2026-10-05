@@ -83,7 +83,14 @@ const DEFAULT_DB: DB = {
 };
 
 // In-memory fallback for serverless environments where FS is ephemeral
-let memoryDB: DB | null = null;
+// Use globalThis to persist across hot reloads and serverless container reuse
+const globalForDB = globalThis as unknown as { __qrmandu_memoryDB: DB | null };
+let memoryDB: DB | null = globalForDB.__qrmandu_memoryDB || null;
+
+function setMemoryDB(db: DB) {
+  memoryDB = db;
+  globalForDB.__qrmandu_memoryDB = db;
+}
 
 function getDataDir() {
   // Try primary, fallback to /tmp
@@ -112,11 +119,11 @@ function ensureDataDir() {
     const file = getDbFile();
     if (!fs.existsSync(file)) {
       fs.writeFileSync(file, JSON.stringify(DEFAULT_DB, null, 2));
-      memoryDB = JSON.parse(JSON.stringify(DEFAULT_DB));
+      setMemoryDB(JSON.parse(JSON.stringify(DEFAULT_DB)));
     }
   } catch (e) {
     // If FS fails completely, use memory
-    if (!memoryDB) memoryDB = JSON.parse(JSON.stringify(DEFAULT_DB));
+    if (!memoryDB) setMemoryDB(JSON.parse(JSON.stringify(DEFAULT_DB)));
   }
 }
 
@@ -131,7 +138,7 @@ export function readDB(): DB {
       if (!parsed.plans || parsed.plans.length === 0) parsed.plans = DEFAULT_DB.plans;
       if (!parsed.admin_users || parsed.admin_users.length === 0) parsed.admin_users = DEFAULT_DB.admin_users;
       // Sync to memory
-      memoryDB = parsed;
+      setMemoryDB(parsed);
       return parsed as DB;
     }
   } catch (e) {
@@ -142,12 +149,13 @@ export function readDB(): DB {
     if (!memoryDB.admin_users || memoryDB.admin_users.length === 0) memoryDB.admin_users = DEFAULT_DB.admin_users;
     return memoryDB as DB;
   }
-  memoryDB = JSON.parse(JSON.stringify(DEFAULT_DB));
-  return memoryDB as DB;
+  const fresh = JSON.parse(JSON.stringify(DEFAULT_DB));
+  setMemoryDB(fresh);
+  return fresh as DB;
 }
 
 export function writeDB(db: DB) {
-  memoryDB = db;
+  setMemoryDB(db);
   try {
     const dir = getDataDir();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -253,7 +261,7 @@ if (typeof window === 'undefined') {
   try {
     ensureDataDir();
     // Don't await, but ensure memoryDB initialized
-    if (!memoryDB) memoryDB = JSON.parse(JSON.stringify(DEFAULT_DB));
+    if (!memoryDB) setMemoryDB(JSON.parse(JSON.stringify(DEFAULT_DB)));
     initAdmin().catch(() => {});
   } catch {}
 }
