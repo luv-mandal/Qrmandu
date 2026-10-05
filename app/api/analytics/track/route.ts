@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import { NextRequest, NextResponse } from 'next/server';
 import { findOne, insertOne, updateOne } from '@/lib/db';
 import { v4 as uuidv4 } from 'uuid';

@@ -3,6 +3,9 @@ import { redirect } from 'next/navigation';
 import { readDB } from '@/lib/db';
 import AdminClient from './admin-client';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 export default async function AdminPage() {
   const admin = await getCurrentAdmin();
   if (!admin || admin.role !== 'admin') redirect('/admin/login');

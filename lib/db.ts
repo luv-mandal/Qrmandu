@@ -2,8 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
+// Vercel has read-only filesystem except /tmp
+const IS_VERCEL = !!process.env.VERCEL;
+const BASE_DATA_DIR = IS_VERCEL ? '/tmp/qrmandu-data' : path.join(process.cwd(), 'data');
+const FALLBACK_DATA_DIR = '/tmp/qrmandu-data';
+const DB_FILE = path.join(BASE_DATA_DIR, 'db.json');
+const FALLBACK_DB_FILE = path.join(FALLBACK_DATA_DIR, 'db.json');
 
 type DB = {
   users: any[];
@@ -18,6 +22,9 @@ type DB = {
   admin_users: any[];
   audit_logs: any[];
 };
+
+// Pre-hashed admin123 for Vercel compatibility (no async init needed)
+const ADMIN_HASH = '$2a$10$XAdHcm4CxY70x56NJIa1Hu6gUNDvnpIwQ8yuPmZIGAM8g1mdvaaNW';
 
 const DEFAULT_DB: DB = {
   users: [],
@@ -64,35 +71,92 @@ const DEFAULT_DB: DB = {
   payments: [],
   analytics_events: [],
   admin_users: [
-    // default admin: admin@qrmandu.com / admin123 - hashed later on init
+    {
+      id: 'admin-default-id',
+      email: 'admin@qrmandu.com',
+      password_hash: ADMIN_HASH,
+      role: 'super_admin',
+      created_at: new Date().toISOString(),
+    }
   ],
   audit_logs: [],
 };
 
+// In-memory fallback for serverless environments where FS is ephemeral
+let memoryDB: DB | null = null;
+
+function getDataDir() {
+  // Try primary, fallback to /tmp
+  try {
+    if (!fs.existsSync(BASE_DATA_DIR)) fs.mkdirSync(BASE_DATA_DIR, { recursive: true });
+    return BASE_DATA_DIR;
+  } catch {
+    try {
+      if (!fs.existsSync(FALLBACK_DATA_DIR)) fs.mkdirSync(FALLBACK_DATA_DIR, { recursive: true });
+      return FALLBACK_DATA_DIR;
+    } catch {
+      return FALLBACK_DATA_DIR;
+    }
+  }
+}
+
+function getDbFile() {
+  const dir = getDataDir();
+  return path.join(dir, 'db.json');
+}
+
 function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify(DEFAULT_DB, null, 2));
+  try {
+    const dir = getDataDir();
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const file = getDbFile();
+    if (!fs.existsSync(file)) {
+      fs.writeFileSync(file, JSON.stringify(DEFAULT_DB, null, 2));
+      memoryDB = JSON.parse(JSON.stringify(DEFAULT_DB));
+    }
+  } catch (e) {
+    // If FS fails completely, use memory
+    if (!memoryDB) memoryDB = JSON.parse(JSON.stringify(DEFAULT_DB));
   }
 }
 
 export function readDB(): DB {
-  ensureDataDir();
+  // If we have memoryDB and are on Vercel, prefer memory if file fails
   try {
-    const raw = fs.readFileSync(DB_FILE, 'utf-8');
-    const parsed = JSON.parse(raw);
-    // ensure plans exist
-    if (!parsed.plans || parsed.plans.length === 0) parsed.plans = DEFAULT_DB.plans;
-    return parsed as DB;
-  } catch {
-    fs.writeFileSync(DB_FILE, JSON.stringify(DEFAULT_DB, null, 2));
-    return DEFAULT_DB;
+    ensureDataDir();
+    const file = getDbFile();
+    if (fs.existsSync(file)) {
+      const raw = fs.readFileSync(file, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (!parsed.plans || parsed.plans.length === 0) parsed.plans = DEFAULT_DB.plans;
+      if (!parsed.admin_users || parsed.admin_users.length === 0) parsed.admin_users = DEFAULT_DB.admin_users;
+      // Sync to memory
+      memoryDB = parsed;
+      return parsed as DB;
+    }
+  } catch (e) {
+    // Fall through to memory
   }
+  if (memoryDB) {
+    if (!memoryDB.plans || memoryDB.plans.length === 0) memoryDB.plans = DEFAULT_DB.plans;
+    if (!memoryDB.admin_users || memoryDB.admin_users.length === 0) memoryDB.admin_users = DEFAULT_DB.admin_users;
+    return memoryDB as DB;
+  }
+  memoryDB = JSON.parse(JSON.stringify(DEFAULT_DB));
+  return memoryDB as DB;
 }
 
 export function writeDB(db: DB) {
-  ensureDataDir();
-  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+  memoryDB = db;
+  try {
+    const dir = getDataDir();
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const file = getDbFile();
+    fs.writeFileSync(file, JSON.stringify(db, null, 2));
+  } catch (e) {
+    // On Vercel, /tmp write should succeed, but if not, keep in memory
+    console.warn('DB write to FS failed, using memory only', e);
+  }
 }
 
 export function getCollection<T = any>(name: keyof DB): T[] {
@@ -146,7 +210,6 @@ export function deleteOne(collection: keyof DB, id: string) {
   return true;
 }
 
-// Helpers for business ownership check
 export function ensureBusinessOwnership(businessId: string, userId: string) {
   const biz = findOne('businesses', (b) => b.id === businessId);
   if (!biz) return null;
@@ -155,25 +218,42 @@ export function ensureBusinessOwnership(businessId: string, userId: string) {
 }
 
 export async function initAdmin() {
-  const bcrypt = await import('bcryptjs');
-  const db = readDB();
-  if (db.admin_users.length === 0) {
-    const hash = await bcrypt.hash('admin123', 10);
-    db.admin_users.push({
-      id: uuidv4(),
-      email: 'admin@qrmandu.com',
-      password_hash: hash,
-      role: 'super_admin',
-      created_at: new Date().toISOString(),
-    });
-    writeDB(db);
-  }
+  try {
+    const bcrypt = await import('bcryptjs');
+    const db = readDB();
+    if (!db.admin_users || db.admin_users.length === 0) {
+      const hash = await bcrypt.hash('admin123', 10);
+      db.admin_users.push({
+        id: uuidv4(),
+        email: 'admin@qrmandu.com',
+        password_hash: hash,
+        role: 'super_admin',
+        created_at: new Date().toISOString(),
+      });
+      writeDB(db);
+    } else {
+      // Ensure default admin exists
+      const exists = db.admin_users.find((a:any)=>a.email==='admin@qrmandu.com');
+      if (!exists) {
+        const hash = await bcrypt.hash('admin123', 10);
+        db.admin_users.push({
+          id: uuidv4(),
+          email: 'admin@qrmandu.com',
+          password_hash: hash,
+          role: 'super_admin',
+          created_at: new Date().toISOString(),
+        });
+        writeDB(db);
+      }
+    }
+  } catch {}
 }
 
-// Initialize on import (server side)
 if (typeof window === 'undefined') {
   try {
     ensureDataDir();
+    // Don't await, but ensure memoryDB initialized
+    if (!memoryDB) memoryDB = JSON.parse(JSON.stringify(DEFAULT_DB));
     initAdmin().catch(() => {});
   } catch {}
 }

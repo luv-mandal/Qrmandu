@@ -3,6 +3,9 @@ import { redirect } from 'next/navigation';
 import { findOne, findMany } from '@/lib/db';
 import Link from 'next/link';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser();
   if (!user) redirect('/login');

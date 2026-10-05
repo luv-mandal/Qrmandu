@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import { NextResponse } from 'next/server';
 import { getCurrentAdmin } from '@/lib/auth';
 import { readDB } from '@/lib/db';

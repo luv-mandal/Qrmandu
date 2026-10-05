@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import { NextRequest, NextResponse } from 'next/server';
 import { findOne } from '@/lib/db';
 import { verifyPassword, signToken } from '@/lib/auth';

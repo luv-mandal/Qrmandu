@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import { NextResponse } from 'next/server';
 import { findOne, findMany } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
