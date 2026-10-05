@@ -96,7 +96,6 @@ export default function OnboardingPage() {
     setError('');
     setLoading(true);
     try {
-      // Normalize link before save to ensure smooth running
       const normalizedLink = normalizeGoogleReviewLink(form.google_review_link);
       const payload = { ...form, google_review_link: normalizedLink };
       
@@ -109,8 +108,14 @@ export default function OnboardingPage() {
       if (!res.ok) throw new Error(data.error || 'Failed to save');
       setBusinessId(data.business.id);
       if (data.qr_code) setQrCode(data.qr_code.code);
-      // Update form with normalized link
       setForm(f => ({ ...f, google_review_link: normalizedLink }));
+      
+      // Store backup in localStorage for Vercel persistence (auto-restore if server clears)
+      try {
+        localStorage.setItem('qrmandu_business_backup', JSON.stringify(payload));
+        localStorage.setItem('qrmandu_business_id', data.business.id);
+      } catch {}
+      
       return data;
     } catch (e: any) {
       setError(e.message);

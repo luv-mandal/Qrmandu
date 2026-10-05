@@ -2,6 +2,7 @@ import { getCurrentUser } from '@/lib/auth';
 import { findOne, findMany } from '@/lib/db';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { EmptyStateClient } from '@/components/dashboard/empty-state-client';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -12,30 +13,8 @@ export default async function DashboardPage() {
   
   const business = findOne('businesses', (b:any)=>b.user_id===user.id);
 
-  // FIX: Don't redirect to onboarding if no business - show empty state instead
-  // This prevents loop: Go to dashboard -> business not found (Vercel ephemeral) -> redirect to onboarding -> business name again
   if (!business) {
-    return (
-      <div className="max-w-[600px] mx-auto py-12">
-        <div className="rounded-[20px] border border-ink-100 bg-white p-8 shadow-soft text-center">
-          <div className="h-16 w-16 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto text-[24px]">!</div>
-          <h1 className="display mt-4 text-[28px] font-semibold">No business yet</h1>
-          <p className="mt-2 text-[14px] text-ink-600">Create your business profile to start getting Google reviews. Takes 2 minutes.</p>
-          
-          <div className="mt-6 space-y-3 text-left rounded-[12px] bg-ink-50 border border-ink-100 p-4 text-[13px]">
-            <div className="font-medium">Why am I seeing this?</div>
-            <div className="text-ink-600">On Vercel serverless, data in /tmp is ephemeral and can reset on cold starts. Your previous business data was cleared. Please recreate it — takes 2 minutes, and your QR will work again.</div>
-            <div className="mt-2 text-[11px] text-ink-500">For production persistence, connect Vercel Postgres or Supabase (see lib/db.ts). For now, we keep data in memory + /tmp.</div>
-          </div>
-
-          <Link href="/onboarding" className="mt-6 inline-flex h-11 px-6 rounded-[12px] bg-ink-900 text-white text-[14px] font-medium items-center justify-center">Create business — 9 steps, 2 mins</Link>
-          
-          <div className="mt-6 text-[12px] text-ink-500">
-            Already created? <a href="/api/health" target="_blank" className="underline">Check API health</a> • <span className="font-mono">{user.email}</span>
-          </div>
-        </div>
-      </div>
-    );
+    return <EmptyStateClient userEmail={user.email} />;
   }
 
   const qrCodes = findMany('qr_codes', (q:any)=>q.business_id===business.id);
@@ -81,7 +60,7 @@ export default async function DashboardPage() {
         <div className="rounded-[16px] border border-ink-100 bg-white p-5 shadow-soft">
           <div className="text-[11px] uppercase tracking-widest font-semibold text-ink-500">Google Review Link</div>
           <div className="mt-2 text-[13px] break-all text-ink-800">{business.google_review_link || 'Not set'}</div>
-          <Link href="/dashboard/settings" className="mt-3 inline-flex text-[13px] underline">Edit link — runs smoothly now</Link>
+          <Link href="/dashboard/settings" className="mt-3 inline-flex text-[13px] underline">Edit link — runs smoothly</Link>
         </div>
         <div className="rounded-[16px] border border-ink-100 bg-white p-5 shadow-soft">
           <div className="text-[11px] uppercase tracking-widest font-semibold text-ink-500">QR Code</div>
